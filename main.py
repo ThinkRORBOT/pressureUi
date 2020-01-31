@@ -17,12 +17,17 @@ class getDataObject(QObject):
     def __init__(self, samplingRate):
         self.samplingRate = samplingRate
         self.gotPressure = pyqtSignal(int, float)
+        self.keepRunning = True
+        
     def __del__(self):
         self.wait()
 
+    def stop(self):
+        self.keepRunning = False
+        
     def run(self):
         time_passed = 0
-        while True:
+        while self.keepRunning:
             cur_pressure = dummy_pressure.get_pressure()
             self.gotPressure.emit(time_passed, cur_pressure)
             time.sleep(1/samplingRate)
@@ -38,6 +43,8 @@ class StartWindow(QMainWindow):
         self.samplingRate = 0
         self.continueLoop = True
         self.chart = QChart()
+        
+        self.series = QLineSeries()
         
         self.chart.setTitle('pressureGraph')
         
@@ -67,57 +74,57 @@ class StartWindow(QMainWindow):
         verAxis[0].setMax(max(yList))
         verAxis[0].setMin(min(yList))
             
-    def process(self, series):
-        time_passed = 0
+    def process(self, time_passed, cur_pressure):
         pList = list()
-        while self.continueLoop:
-            # to be able to get mouse input
-            QApplication.processEvents()
+        print(cur_pressure)
             
-            cur_pressure = dummy_pressure.get_pressure()
-            print(cur_pressure)
-            
-            if len(series) != 0:
-                self.chart.removeSeries(series)
-            if len(series) > 10:
-                # remove the first index after certain number of data
-                series.remove(0)
-                pList = pList[1:]
-            series.append(time_passed/self.samplingRate, cur_pressure)
-            pList.append(cur_pressure)
-            self.chart.addSeries(series)
+        if len(self.series) != 0:
+            self.chart.removeSeries(self.series)
+        if len(self.series) > 10:
+            # remove the first index after certain number of data
+            self.series.remove(0)
+            pList = pList[1:]
+        self.series.append(time_passed/self.samplingRate, cur_pressure)
+        pList.append(cur_pressure)
+        self.chart.addSeries(self.series)
 
-            # only create new axes in first instance to avoid clipping of labels.
-            if len(series) < 2:
-                self.chart.createDefaultAxes()
+        # only create new axes in first instance to avoid clipping of labels.
+        if len(self.series) < 2:
+            self.chart.createDefaultAxes()
         
-            self.ui.pressureDisplay.setText('{:.4f}'.format(cur_pressure))
-            leak = False
-            leakO = leak_check()
-            leak = leakO.check_leak(cur_pressure)
-            if not leak:
-                self.ui.leakStatusBox.setText("No Pressure Drop detected")
-            else:
-                self.ui.leakStatusBox.setText("Pressure drop detected. Email sent")
-                email_warning.send_message(pList)
-                return
+        self.ui.pressureDisplay.setText('{:.4f}'.format(cur_pressure))
+        leak = False
+        leakO = leak_check()
+        leak = leakO.check_leak(cur_pressure)
+        if not leak:
+            self.ui.leakStatusBox.setText("No Pressure Drop detected")
+        else:
+            self.ui.leakStatusBox.setText("Pressure drop detected. Email sent")
+            email_warning.send_message(pList)
+            return
             
-            self.setAxis(time_passed, pList)
-            time.sleep(1/self.samplingRate)
-            #self.chart.removeAxis(horAxis[0])
-            #self.chart.removeAxis(verAxis[0])
-            time_passed += 1
+        self.setAxis(time_passed, pList)
+        time.sleep(1/self.samplingRate)
+        #self.chart.removeAxis(horAxis[0])
+        #self.chart.removeAxis(verAxis[0])
+        time_passed += 1
         return
 
     def startCollection(self):
-        series = QLineSeries()
         if self.samplingRate == 0:
             msgBox = QMessageBox()
             msgBox.setText('Set Sampling rate first')
             msgBox.exec()
             return
         self.continueLoop = True
-        self.process(series)
+        objThread = QThread()
+        dataObj = getDataObject(self.samplingRate)
+        dataObj.moveToThread(objThread)
+        dataObj.gotPressure.connect(self.process)
+        objThread.started.connect(dataObj.run)
+        objThread.start()
+        self.ui.stopButton.setEnabled(True)
+        self.ui.stopButton.clicked.connect(objThread.stop)
         # t1 = threading.Thread(target=self.process, args = (series))
         print('stopped')
         return
