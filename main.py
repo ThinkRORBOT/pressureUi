@@ -14,22 +14,23 @@ import threading
 
 
 class getDataObject(QObject):
-    def __init__(self, samplingRate):
-        self.samplingRate = samplingRate
-        self.gotPressure = pyqtSignal(int, float)
-        self.keepRunning = True
-        
+    gotPressure = pyqtSignal(float, float)
+    keepRunning = True
+    @pyqtSlot()
     def __del__(self):
         self.wait()
 
     def stop(self):
+        print('button clicked')
         self.keepRunning = False
         
-    def run(self):
+    def run(self, samplingRate):
         time_passed = 0
         while self.keepRunning:
+            QApplication.processEvents()
             cur_pressure = dummy_pressure.get_pressure()
             self.gotPressure.emit(time_passed, cur_pressure)
+            time_passed += 1
             time.sleep(1/samplingRate)
             
 
@@ -45,6 +46,7 @@ class StartWindow(QMainWindow):
         self.chart = QChart()
         
         self.series = QLineSeries()
+        self.thread = QThread()
         
         self.chart.setTitle('pressureGraph')
         
@@ -77,7 +79,6 @@ class StartWindow(QMainWindow):
     def process(self, time_passed, cur_pressure):
         pList = list()
         print(cur_pressure)
-            
         if len(self.series) != 0:
             self.chart.removeSeries(self.series)
         if len(self.series) > 10:
@@ -104,10 +105,6 @@ class StartWindow(QMainWindow):
             return
             
         self.setAxis(time_passed, pList)
-        time.sleep(1/self.samplingRate)
-        #self.chart.removeAxis(horAxis[0])
-        #self.chart.removeAxis(verAxis[0])
-        time_passed += 1
         return
 
     def startCollection(self):
@@ -117,12 +114,11 @@ class StartWindow(QMainWindow):
             msgBox.exec()
             return
         self.continueLoop = True
-        objThread = QThread()
-        dataObj = getDataObject(self.samplingRate)
-        dataObj.moveToThread(objThread)
+        dataObj = getDataObject()
+        dataObj.moveToThread(self.thread)
         dataObj.gotPressure.connect(self.process)
-        objThread.started.connect(dataObj.run)
-        objThread.start()
+        self.thread.started.connect(dataObj.run(self.samplingRate))
+        self.thread.start()
         self.ui.stopButton.setEnabled(True)
         self.ui.stopButton.clicked.connect(objThread.stop)
         # t1 = threading.Thread(target=self.process, args = (series))
