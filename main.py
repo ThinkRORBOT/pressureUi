@@ -16,23 +16,26 @@ import threading
 class getDataObject(QObject):
     gotPressure = pyqtSignal(float, float)
     keepRunning = True
+    finished = pyqtSignal()
     @pyqtSlot()
     def __del__(self):
         self.wait()
 
     def stop(self):
         print('button clicked')
+        
         self.keepRunning = False
         
     def run(self, samplingRate):
         time_passed = 0
+        print(QThread.currentThreadId())
         while self.keepRunning:
             QApplication.processEvents()
             cur_pressure = dummy_pressure.get_pressure()
             self.gotPressure.emit(time_passed, cur_pressure)
             time_passed += 1
             time.sleep(1/samplingRate)
-            
+        self.finished.emit()
 
 
 class StartWindow(QMainWindow):
@@ -47,6 +50,7 @@ class StartWindow(QMainWindow):
         
         self.series = QLineSeries()
         self.thread = QThread()
+        self.dataObj = getDataObject()
         
         self.chart.setTitle('pressureGraph')
         
@@ -64,6 +68,9 @@ class StartWindow(QMainWindow):
 
     def stopLoop(self):
         self.continueLoop = False
+        # self.thread.exit()
+        self.dataObj.stop()
+        
 
     def setAxis(self, time_passed, yList):
         horAxis = self.chart.axes(orientation=Qt.Horizontal)
@@ -108,19 +115,24 @@ class StartWindow(QMainWindow):
         return
 
     def startCollection(self):
+        print(QThread.currentThreadId())
         if self.samplingRate == 0:
             msgBox = QMessageBox()
             msgBox.setText('Set Sampling rate first')
             msgBox.exec()
             return
         self.continueLoop = True
-        dataObj = getDataObject()
-        dataObj.moveToThread(self.thread)
-        dataObj.gotPressure.connect(self.process)
-        self.thread.started.connect(dataObj.run(self.samplingRate))
-        self.thread.start()
-        self.ui.stopButton.setEnabled(True)
-        self.ui.stopButton.clicked.connect(objThread.stop)
+        self.dataObj.gotPressure.connect(self.process)
+        self.dataObj.moveToThread(self.thread)
+        self.dataObj.finished.connect(self.thread.quit)
+        try:
+            # find a better way to handle an exception where I think dataObj doesn't exist
+            self.thread.started.connect(self.dataObj.run(self.samplingRate))
+            self.thread.start()
+        except TypeError as e:
+            print(e)
+            print('thread stopped')
+        # self.ui.stopButton.clicked.connect(dataObj.stop)
         # t1 = threading.Thread(target=self.process, args = (series))
         print('stopped')
         return
